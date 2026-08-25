@@ -1,1 +1,2 @@
 gym-super-mario-bros==7.3.0
+opencv-python>=5.0.0

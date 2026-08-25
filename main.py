@@ -6,6 +6,7 @@ Install dependencies once, if needed:
 
 import sys
 
+import cv2
 import gymnasium
 
 # gym-super-mario-bros still imports the old ``gym`` module, while current
@@ -34,11 +35,15 @@ def create_environment() -> JoypadSpace:
         if int(game.ram[0x00B5]) < 1
         else 255 - int(game.ram[0x03B8])
     )
-    return JoypadSpace(gym_super_mario_bros.make("SuperMarioBros-v0"), SIMPLE_MOVEMENT)
+    # v0 uses the original NES "vanilla" view instead of rectangle crop.
+    env = gym_super_mario_bros.make("SuperMarioBros-v0")
+    # Avoid pyglet viewer issues on Python 3.13 by using RGB frame rendering.
+    env.unwrapped.render_mode = "rgb_array"
+    return JoypadSpace(env, SIMPLE_MOVEMENT)
 
 
 def main() -> None:
-    """Open Mario and repeatedly play using random actions."""
+    """Open Mario and play one episode with random actions."""
     env = create_environment()
 
     try:
@@ -46,15 +51,24 @@ def main() -> None:
         for _ in range(100_000):
             action = env.action_space.sample()
             observation, reward, terminated, truncated, info = env.step(action)
-            env.render()
+            frame = env.render()
+            if frame is not None:
+                cv2.imshow("Super Mario AI", cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+                key = cv2.waitKey(1) & 0xFF
+                # Allow immediate quit from keyboard or window close button.
+                if key in (ord("q"), 27):
+                    break
+                if cv2.getWindowProperty("Super Mario AI", cv2.WND_PROP_VISIBLE) < 1:
+                    break
 
-            # Start another level attempt after Mario dies or the episode ends.
+            # Stop after this episode; do not auto-restart forever.
             if terminated or truncated:
-                observation, info = env.reset()
+                break
     except KeyboardInterrupt:
         print("\nMario stopped.")
     finally:
         env.close()
+        cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":

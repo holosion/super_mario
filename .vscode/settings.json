@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^& \"C:\\\\Users\\\\AKENA\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python313\\\\python\\.exe\" \"\\.\\\\main\\.py\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}
