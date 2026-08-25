@@ -1,2 +1,1 @@
-gym==0.26.2
 gym-super-mario-bros==7.3.0

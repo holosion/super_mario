@@ -4,14 +4,23 @@ Install dependencies once, if needed:
     python -m pip install gym-super-mario-bros
 """
 
+import sys
+
+import gymnasium
+
+# gym-super-mario-bros still imports the old ``gym`` module, while current
+# nes-py uses Gymnasium.  Alias it before importing Mario so both use the
+# same environment API.
+sys.modules["gym"] = gymnasium
+
 import gym_super_mario_bros
 from gym_super_mario_bros.actions import SIMPLE_MOVEMENT
 from gym_super_mario_bros.smb_env import SuperMarioBrosEnv
 from nes_py.wrappers import JoypadSpace
 
 
-def main() -> None:
-    """Open Mario and repeatedly play using random actions."""
+def create_environment() -> JoypadSpace:
+    """Create a Mario environment compatible with current dependencies."""
     # gym-super-mario-bros reads NES RAM as NumPy uint8 values.  Converting
     # before arithmetic keeps it compatible with NumPy 2.x.
     SuperMarioBrosEnv._x_position = property(
@@ -25,10 +34,12 @@ def main() -> None:
         if int(game.ram[0x00B5]) < 1
         else 255 - int(game.ram[0x03B8])
     )
-    env = JoypadSpace(
-        gym_super_mario_bros.make("SuperMarioBros-v0", disable_env_checker=True),
-        SIMPLE_MOVEMENT,
-    )
+    return JoypadSpace(gym_super_mario_bros.make("SuperMarioBros-v0"), SIMPLE_MOVEMENT)
+
+
+def main() -> None:
+    """Open Mario and repeatedly play using random actions."""
+    env = create_environment()
 
     try:
         observation, info = env.reset()
