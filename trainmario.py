@@ -44,15 +44,17 @@ PHASES = {
 }
 PHASE = 1                                       # <-- which phase to train right now (1, 2 or 3)
 LOAD_MODEL_PATH = os.environ.get("MARIO_LOAD_MODEL_PATH") or None
+TIME_LIMIT_SECONDS = int(os.environ.get("MARIO_TIME_LIMIT_SECONDS", "3300"))
+TOTAL_TIMESTEPS = int(os.environ.get("MARIO_TOTAL_TIMESTEPS", str(PHASES[PHASE]["steps"])))
 
-N_ENVS = 8                                      # how many Mario games run at the same time (use 4 if low RAM)
+N_ENVS = int(os.environ.get("MARIO_N_ENVS", "8"))
 USE_SUBPROC = True                              # True = one process per game (faster), False = single process
 FRAME_SKIP = 4                                  # the agent picks an action once every 4 game frames
 IMG_SIZE = 84                                   # screen is shrunk to 84 x 84 pixels
 N_STACK = 4                                     # number of past frames the agent sees at once
-EVAL_FREQ = 50_000                              # test the model every 50k training steps (all envs combined)
-CHECKPOINT_FREQ = 100_000                       # save a safety copy every 100k steps
-N_EVAL_EPISODES = 5                             # how many games each test uses to score the model
+EVAL_FREQ = int(os.environ.get("MARIO_EVAL_FREQ", "50000"))
+CHECKPOINT_FREQ = int(os.environ.get("MARIO_CHECKPOINT_FREQ", "100000"))
+N_EVAL_EPISODES = int(os.environ.get("MARIO_EVAL_EPISODES", "5"))
 SEED = 42                                       # fixed random seed so runs are more repeatable
 
 # NumPy 2 no longer silently casts the intermediate value 256 back to uint8.
@@ -224,11 +226,31 @@ class MarioStatsCallback(BaseCallback):
         return True                                               # returning False would stop training
 
 
+class TimeLimitCallback(BaseCallback):
+    """Stop training at the wall-clock limit so the normal final save can run."""
+
+    def __init__(self, seconds):
+        super().__init__()
+        self.seconds = seconds
+        self.started_at = None
+
+    def _on_training_start(self):
+        self.started_at = time.monotonic()
+        print(f"Wall-clock limit: {self.seconds // 60} minutes", flush=True)
+
+    def _on_step(self) -> bool:
+        elapsed = time.monotonic() - self.started_at
+        if elapsed >= self.seconds:
+            print(f"Time limit reached after {elapsed / 60:.1f} minutes; saving model.", flush=True)
+            return False
+        return True
+
+
 # ------------------------------- 5. MAIN TRAINING FUNCTION ---------------------------
 def main():
     phase = PHASES[PHASE]                                         # pick the settings for the chosen phase
     env_id = phase["env_id"]                                      # e.g. "SuperMarioBros-1-1-v0"
-    total_steps = phase["steps"]                                  # how long to train in this run
+    total_steps = TOTAL_TIMESTEPS                                 # upper bound; wall-clock limit may stop sooner
     run_name = f"phase{PHASE}_{time.strftime('%Y%m%d_%H%M%S')}"   # unique name, e.g. phase1_20260929_101500
     run_dir = os.path.join(SAVE_DIR, run_name)                    # this run's folder inside saved_models/
     os.makedirs(LOG_DIR, exist_ok=True)                           # create training/logs (ignore if it exists)
@@ -253,7 +275,8 @@ def main():
         save_path=os.path.join(run_dir, "checkpoints"),           # training/saved_models/<run>/checkpoints/
         name_prefix="mario",                                      # files become mario_250000_steps.zip, ...
     )
-    callbacks = CallbackList([eval_callback, checkpoint_callback, MarioStatsCallback()])   # use all three
+    callbacks = CallbackList([eval_callback, checkpoint_callback, MarioStatsCallback(),
+                              TimeLimitCallback(TIME_LIMIT_SECONDS)])
 
     if LOAD_MODEL_PATH:                                           # continue training an older model?
         model = PPO.load(LOAD_MODEL_PATH, env=train_env,          # load its brain and attach the new env
