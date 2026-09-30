@@ -13,6 +13,7 @@ import gymnasium as gym                         # Gymnasium = the maintained ver
 from gymnasium import spaces                    # 'spaces' describe the shape/type of observations and actions
 
 import gym_super_mario_bros                     # the Super Mario Bros NES game packaged as an RL environment
+from gym_super_mario_bros.smb_env import SuperMarioBrosEnv
 from gym_super_mario_bros.actions import SIMPLE_MOVEMENT   # a short list of useful button combos (7 actions)
 from nes_py.wrappers import JoypadSpace         # restricts the NES controller to a chosen list of button combos
 
@@ -28,7 +29,7 @@ from stable_baselines3.common.callbacks import CallbackList       # lets us use 
 
 # ------------------------------- 2. SETTINGS -----------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))   # folder that contains this script
-TRAIN_DIR = os.path.join(BASE_DIR, "training")          # main folder:  training/
+TRAIN_DIR = os.environ.get("MARIO_TRAIN_DIR", os.path.join(BASE_DIR, "training"))
 LOG_DIR = os.path.join(TRAIN_DIR, "logs")               # subfolder for TensorBoard + evaluation logs
 SAVE_DIR = os.path.join(TRAIN_DIR, "saved_models")      # subfolder for saved models (best/final/checkpoints)
 
@@ -42,7 +43,7 @@ PHASES = {
     3: {"env_id": "SuperMarioBros-v0",              "steps": 30_000_000},
 }
 PHASE = 1                                       # <-- which phase to train right now (1, 2 or 3)
-LOAD_MODEL_PATH = None                          # e.g. "training/saved_models/<run>/best_model.zip" to continue
+LOAD_MODEL_PATH = os.environ.get("MARIO_LOAD_MODEL_PATH") or None
 
 N_ENVS = 8                                      # how many Mario games run at the same time (use 4 if low RAM)
 USE_SUBPROC = True                              # True = one process per game (faster), False = single process
@@ -50,9 +51,25 @@ FRAME_SKIP = 4                                  # the agent picks an action once
 IMG_SIZE = 84                                   # screen is shrunk to 84 x 84 pixels
 N_STACK = 4                                     # number of past frames the agent sees at once
 EVAL_FREQ = 50_000                              # test the model every 50k training steps (all envs combined)
-CHECKPOINT_FREQ = 250_000                       # save a safety copy every 250k steps
+CHECKPOINT_FREQ = 100_000                       # save a safety copy every 100k steps
 N_EVAL_EPISODES = 5                             # how many games each test uses to score the model
 SEED = 42                                       # fixed random seed so runs are more repeatable
+
+# NumPy 2 no longer silently casts the intermediate value 256 back to uint8.
+# The upstream Mario environment multiplies a uint8 RAM byte by 256 while
+# calculating Mario's world x-position, which raises during environment reset.
+# Convert the bytes to Python ints first, preserving the original calculation.
+SuperMarioBrosEnv._x_position = property(
+    lambda self: int(self.ram[0x6D]) * 0x100 + int(self.ram[0x86])
+)
+SuperMarioBrosEnv._x_position_screen = property(
+    lambda self: (int(self.ram[0x86]) - int(self.ram[0x071C])) % 256
+)
+SuperMarioBrosEnv._y_position = property(
+    lambda self: (255 + (255 - int(self.ram[0x03B8]))
+                  if int(self.ram[0x00B5]) < 1
+                  else 255 - int(self.ram[0x03B8]))
+)
 
 
 # ------------------------------- 3. ENVIRONMENT WRAPPERS -----------------------------
@@ -85,7 +102,8 @@ class OldGymToGymnasium(gym.Env):
         return obs, reward, terminated, truncated, info           # new API always returns 5 values
 
     def render_human(self):                                       # small helper used by evaluatemario.py
-        self._env.render(mode="human")                            # opens/updates the game window
+        self._env.render_mode = "human"                           # current nes_py chooses render mode on the env
+        self._env.render()                                         # opens/updates the game window
 
     def close(self):                                              # free the emulator when finished
         self._env.close()                                         # close the underlying NES emulator
@@ -158,7 +176,12 @@ def make_mario_env(env_id, rank=0):
     """Returns a function that builds ONE fully-wrapped Mario environment (needed by the VecEnv classes)."""
 
     def _init():                                                  # the builder function
-        raw = gym_super_mario_bros.make(env_id)                   # create the Mario game (old gym API)
+        # Its bundled nes_py currently exposes Gymnasium spaces while this
+        # registration still uses legacy Gym's checker; our adapter below
+        # handles the API boundary, so skip the incompatible legacy checker.
+        raw = gym_super_mario_bros.make(
+            env_id, disable_env_checker=True
+        ).unwrapped  # remove legacy Gym wrappers; nes_py itself uses Gymnasium
         raw = JoypadSpace(raw, SIMPLE_MOVEMENT)                   # allow only 7 button combos (right, jump, ...)
         env = OldGymToGymnasium(raw)                              # translate old gym -> gymnasium
         env = SkipFrame(env, skip=FRAME_SKIP)                     # repeat each action for 4 frames
@@ -257,13 +280,28 @@ def main():
         )
         reset_steps = True                                        # new model -> step counter starts from 0
 
-    model.learn(
-        total_timesteps=total_steps,                              # how many game steps to train for
-        callback=callbacks,                                       # attach best-model / checkpoint / stats callbacks
-        tb_log_name=run_name,                                     # name of this run inside TensorBoard
-        reset_num_timesteps=reset_steps,                          # start the counter at 0 or keep the old count
-        progress_bar=True,                                        # show a progress bar (needs tqdm + rich)
-    )
+    interrupted = False
+    try:
+        model.learn(
+            total_timesteps=total_steps,                          # how many game steps to train for
+            callback=callbacks,                                   # attach best-model / checkpoint / stats callbacks
+            tb_log_name=run_name,                                 # name of this run inside TensorBoard
+            reset_num_timesteps=reset_steps,                      # start at 0 or keep the old count
+            progress_bar=True,                                    # show a progress bar (needs tqdm + rich)
+        )
+    except KeyboardInterrupt:
+        interrupted = True
+        interrupted_path = os.path.join(run_dir, "interrupted_model")
+        print("\nTraining interrupted. Saving the current model...", flush=True)
+        model.save(interrupted_path)
+    finally:
+        train_env.close()                                         # close worker games on completion or interruption
+        eval_env.close()
+
+    if interrupted:
+        print(f"Saved resume point: {interrupted_path}.zip")
+        print("Run the notebook's resume cell, then start training again.")
+        return
 
     final_path = os.path.join(run_dir, "final_model")             # where the last model will be stored
     model.save(final_path)                                        # writes final_model.zip
@@ -271,8 +309,6 @@ def main():
     print(f"          Best model  : {os.path.join(run_dir, 'best_model.zip')}")
     print(f"          TensorBoard : tensorboard --logdir {LOG_DIR}")
 
-    train_env.close()                                             # shut down the training games
-    eval_env.close()                                              # shut down the test game
 
 
 # ------------------------------- 6. ENTRY POINT --------------------------------------
