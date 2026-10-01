@@ -21,11 +21,11 @@ from trainmario import make_mario_env, LOG_DIR, SAVE_DIR, PHASES, N_STACK
 # ------------------------------- 2. SETTINGS -----------------------------------------
 PHASE_TO_EVAL = 1                               # which phase's game to test on (1 = level 1-1, 3 = full game)
 MODEL_PATH = None                               # None = auto-pick newest best_model.zip; or give an exact path
-N_EPISODES = 10                                 # how many games to play for the test
+N_EPISODES = 1                                  # one visible demo episode; increase for repeated evaluation
 DETERMINISTIC = False                           # False = sample actions (usually plays better in Mario)
 RENDER = os.environ.get("MARIO_RENDER", "1").lower() not in {"0", "false", "no"}
 FPS = 30                                        # slows the window down so a human can follow (only if RENDER)
-MAX_STEPS = 20_000                              # safety cap on steps per game so a test can never hang forever
+MAX_STEPS = 2_000                               # keep the first visible demo to about a minute at 30 FPS
 
 
 # ------------------------------- 3. HELPERS ------------------------------------------

@@ -104,8 +104,11 @@ class OldGymToGymnasium(gym.Env):
         return obs, reward, terminated, truncated, info           # new API always returns 5 values
 
     def render_human(self):                                       # small helper used by evaluatemario.py
-        self._env.render_mode = "human"                           # current nes_py chooses render mode on the env
-        self._env.render()                                         # opens/updates the game window
+        # Gymnasium wrappers expose render_mode as read-only; set it on the raw
+        # NES environment instead, then render that environment directly.
+        raw_env = self._env.unwrapped
+        raw_env.render_mode = "human"
+        raw_env.render()                                           # opens/updates the game window
 
     def close(self):                                              # free the emulator when finished
         self._env.close()                                         # close the underlying NES emulator
