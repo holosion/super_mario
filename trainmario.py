@@ -6,6 +6,7 @@
 # ------------------------------- 1. IMPORTS ------------------------------------------
 import os                                       # 'os' = operating-system tools (make folders, join paths)
 import time                                     # 'time' = lets us read the clock (used to name each run)
+import sys                                        # write a compact progress bar in the terminal
 
 import cv2                                      # OpenCV = image library (we use it to shrink/grey the screen)
 import numpy as np                              # NumPy = fast arrays (images are NumPy arrays)
@@ -249,6 +250,46 @@ class TimeLimitCallback(BaseCallback):
         return True
 
 
+class ProgressBarCallback(BaseCallback):
+    """Show training progress without optional tqdm/rich packages."""
+
+    def __init__(self, total_timesteps):
+        super().__init__()
+        self.target_timesteps = total_timesteps
+        self.started_at = None
+        self.last_print = 0.0
+        self.start_step = 0
+
+    def _on_training_start(self):
+        self.started_at = time.monotonic()
+        self.start_step = self.num_timesteps
+
+    def _on_step(self) -> bool:
+        elapsed = time.monotonic() - self.started_at
+        if elapsed - self.last_print < 1.0:
+            return True
+        self.last_print = elapsed
+        current = self.num_timesteps
+        fraction = min(current / max(self.target_timesteps, 1), 1.0)
+        width = 30
+        filled = int(width * fraction)
+        rate = (current - self.start_step) / max(elapsed, 1.0)
+        eta = (self.target_timesteps - current) / rate if rate > 0 else 0
+        eta_text = time.strftime("%H:%M:%S", time.gmtime(max(eta, 0)))
+        bar = "=" * filled + ">" + " " * max(width - filled - 1, 0)
+        sys.stdout.write(
+            f"\rProgress: [{bar}] {fraction:6.1%}  "
+            f"{current:,}/{self.target_timesteps:,} steps  "
+            f"{rate:.0f} steps/s  ETA {eta_text}"
+        )
+        sys.stdout.flush()
+        return True
+
+    def _on_training_end(self):
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+
+
 # ------------------------------- 5. MAIN TRAINING FUNCTION ---------------------------
 def main():
     phase = PHASES[PHASE]                                         # pick the settings for the chosen phase
@@ -279,6 +320,7 @@ def main():
         name_prefix="mario",                                      # files become mario_250000_steps.zip, ...
     )
     callbacks = CallbackList([eval_callback, checkpoint_callback, MarioStatsCallback(),
+                              ProgressBarCallback(total_timesteps=total_steps),
                               TimeLimitCallback(TIME_LIMIT_SECONDS)])
 
     if LOAD_MODEL_PATH:                                           # continue training an older model?
@@ -340,4 +382,5 @@ def main():
 # ------------------------------- 6. ENTRY POINT --------------------------------------
 if __name__ == "__main__":                                        # True only when you run THIS file directly
     main()                                                        # needed on Windows so subprocesses don't re-run it
+
 
