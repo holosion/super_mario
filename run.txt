@@ -1,0 +1,5 @@
+$env:MARIO_LOAD_MODEL_PATH = (Resolve-Path ".\Training\saved_models\colab_demo\best_model.zip").Path
+$env:MARIO_N_ENVS = "4"
+$env:MARIO_TOTAL_TIMESTEPS = "2000000"
+$env:MARIO_TIME_LIMIT_SECONDS = "3300"
+.\.venv\Scripts\python.exe -u .\trainmario.py

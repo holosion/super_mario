@@ -23,6 +23,7 @@ from stable_baselines3.common.monitor import Monitor              # records rewa
 from stable_baselines3.common.vec_env import DummyVecEnv          # runs N envs one after another (1 process)
 from stable_baselines3.common.vec_env import SubprocVecEnv        # runs N envs in parallel (N processes)
 from stable_baselines3.common.vec_env import VecFrameStack        # stacks the last 4 frames so AI sees motion
+from stable_baselines3.common.vec_env import VecTransposeImage   # keep eval image layout aligned with PPO's CNN
 from stable_baselines3.common.callbacks import BaseCallback       # parent class for writing our own callback
 from stable_baselines3.common.callbacks import EvalCallback       # tests the model often and keeps the BEST one
 from stable_baselines3.common.callbacks import CheckpointCallback # saves the model every X steps (safety copies)
@@ -303,7 +304,7 @@ def main():
     print(f"Training on {env_id} for {total_steps:,} steps  |  run name: {run_name}")   # tell the user
 
     train_env = build_vec_env(env_id, N_ENVS, USE_SUBPROC)        # the games the agent LEARNS from
-    eval_env = build_vec_env(env_id, 1, False)                    # a separate single game used only for TESTING
+    eval_env = VecTransposeImage(build_vec_env(env_id, 1, False))  # match PPO's channel-first CNN wrapper
 
     eval_callback = EvalCallback(                                 # test the model regularly, keep the best one
         eval_env,                                                 # the test environment
@@ -363,8 +364,11 @@ def main():
         print("\nTraining interrupted. Saving the current model...", flush=True)
         model.save(interrupted_path)
     finally:
-        train_env.close()                                         # close worker games on completion or interruption
-        eval_env.close()
+        for env in (train_env, eval_env):                         # close workers even if one already exited
+            try:
+                env.close()
+            except (EOFError, BrokenPipeError, OSError) as close_error:
+                print(f"Environment cleanup note: {close_error}", flush=True)
 
     if interrupted:
         print(f"Saved resume point: {interrupted_path}.zip")
