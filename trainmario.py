@@ -47,7 +47,7 @@ LOAD_MODEL_PATH = os.environ.get("MARIO_LOAD_MODEL_PATH") or None
 TIME_LIMIT_SECONDS = int(os.environ.get("MARIO_TIME_LIMIT_SECONDS", "3300"))
 TOTAL_TIMESTEPS = int(os.environ.get("MARIO_TOTAL_TIMESTEPS", str(PHASES[PHASE]["steps"])))
 
-N_ENVS = int(os.environ.get("MARIO_N_ENVS", "8"))
+N_ENVS = int(os.environ.get("MARIO_N_ENVS", "4"))
 USE_SUBPROC = True                              # True = one process per game (faster), False = single process
 FRAME_SKIP = 4                                  # the agent picks an action once every 4 game frames
 IMG_SIZE = 84                                   # screen is shrunk to 84 x 84 pixels
@@ -313,7 +313,7 @@ def main():
             callback=callbacks,                                   # attach best-model / checkpoint / stats callbacks
             tb_log_name=run_name,                                 # name of this run inside TensorBoard
             reset_num_timesteps=reset_steps,                      # start at 0 or keep the old count
-            progress_bar=True,                                    # show a progress bar (needs tqdm + rich)
+            progress_bar=False,                                   # avoid optional tqdm/rich dependency
         )
     except KeyboardInterrupt:
         interrupted = True
@@ -340,3 +340,4 @@ def main():
 # ------------------------------- 6. ENTRY POINT --------------------------------------
 if __name__ == "__main__":                                        # True only when you run THIS file directly
     main()                                                        # needed on Windows so subprocesses don't re-run it
+
